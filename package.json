@@ -1,6 +1,6 @@
 {
-  "name": "free-fire-events-api",
-  "version": "2.0.0",
+  "name": "ffvntgm-freefire-events-api",
+  "version": "3.0.0",
   "private": true,
   "engines": {
     "node": "24.x"

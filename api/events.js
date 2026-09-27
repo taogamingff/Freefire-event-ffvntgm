@@ -1,4 +1,14 @@
-// api/events.js
+/**
+ * FREE FIRE EVENTS API
+ * API ONLY - VERCEL
+ *
+ * Endpoint:
+ * /api/events
+ * /api/events?server=VN
+ * /api/events?server=VN&status=ACTIVE
+ * /api/events?server=all
+ * /api/events?q=keyword
+ */
 
 const SERVERS = {
   VN: "Vietnam",
@@ -19,34 +29,19 @@ const SERVERS = {
 };
 
 /*
- * ============================================================
- * DỮ LIỆU EVENT
- * ============================================================
- *
- * Thay DATA_SOURCE bằng nguồn dữ liệu thực tế của bạn.
- *
- * Không nên tự tạo tên event/thời gian/phần thưởng rồi gọi đó
- * là dữ liệu chính thức của Free Fire.
- *
- * Mỗi event có dạng:
- *
- * {
- *   id: "unique-event-id",
- *   server: "VN",
- *   title: "Tên sự kiện",
- *   description: "Mô tả",
- *   banner: "https://...",
- *   start_at: "2026-09-27T00:00:00+07:00",
- *   end_at: "2026-09-30T23:59:59+07:00",
- *   rewards: [],
- *   type: "event",
- *   source: "..."
- * }
- *
- * ============================================================
- */
+|--------------------------------------------------------------------------
+| DỮ LIỆU
+|--------------------------------------------------------------------------
+|
+| Đây là nơi API nhận dữ liệu event.
+|
+| Bạn có thể kết nối nguồn dữ liệu thực tế vào đây.
+|
+| Không tự tạo event giả để đại diện cho dữ liệu chính thức của Free Fire.
+|
+*/
 
-const DATA_SOURCE = {
+const EVENTS = {
   VN: [],
   TH: [],
   ID: [],
@@ -64,14 +59,13 @@ const DATA_SOURCE = {
   CIS: []
 };
 
-
 /*
- * ============================================================
- * HELPER
- * ============================================================
- */
+|--------------------------------------------------------------------------
+| DATE
+|--------------------------------------------------------------------------
+*/
 
-function parseDate(value) {
+function toDate(value) {
   if (!value) return null;
 
   const date = new Date(value);
@@ -83,12 +77,17 @@ function parseDate(value) {
   return date;
 }
 
+/*
+|--------------------------------------------------------------------------
+| STATUS
+|--------------------------------------------------------------------------
+*/
 
 function getStatus(startAt, endAt) {
   const now = Date.now();
 
-  const start = parseDate(startAt);
-  const end = parseDate(endAt);
+  const start = toDate(startAt);
+  const end = toDate(endAt);
 
   if (!start || !end) {
     return "UNKNOWN";
@@ -98,169 +97,212 @@ function getStatus(startAt, endAt) {
     return "UPCOMING";
   }
 
-  if (now >= start.getTime() && now <= end.getTime()) {
+  if (now <= end.getTime()) {
     return "ACTIVE";
   }
 
   return "ENDED";
 }
 
+/*
+|--------------------------------------------------------------------------
+| COUNTDOWN
+|--------------------------------------------------------------------------
+*/
 
-function getRemaining(startAt, endAt) {
+function getCountdown(startAt, endAt) {
   const now = Date.now();
 
-  const start = parseDate(startAt);
-  const end = parseDate(endAt);
+  const start = toDate(startAt);
+  const end = toDate(endAt);
 
   if (!start || !end) {
     return {
       milliseconds: null,
-      seconds: null
+      seconds: null,
+      minutes: null,
+      hours: null,
+      days: null
     };
   }
+
+  let milliseconds;
 
   if (now < start.getTime()) {
-    const ms = start.getTime() - now;
-
-    return {
-      milliseconds: ms,
-      seconds: Math.floor(ms / 1000)
-    };
-  }
-
-  if (now <= end.getTime()) {
-    const ms = end.getTime() - now;
-
-    return {
-      milliseconds: ms,
-      seconds: Math.floor(ms / 1000)
-    };
+    milliseconds = start.getTime() - now;
+  } else if (now <= end.getTime()) {
+    milliseconds = end.getTime() - now;
+  } else {
+    milliseconds = 0;
   }
 
   return {
-    milliseconds: 0,
-    seconds: 0
+    milliseconds,
+    seconds: Math.floor(milliseconds / 1000),
+    minutes: Math.floor(milliseconds / 60000),
+    hours: Math.floor(milliseconds / 3600000),
+    days: Math.floor(milliseconds / 86400000)
   };
 }
-
-
-function normalizeEvent(event, server) {
-  const startAt = event.start_at || event.startAt || null;
-  const endAt = event.end_at || event.endAt || null;
-
-  const status = getStatus(startAt, endAt);
-  const remaining = getRemaining(startAt, endAt);
-
-  return {
-    id: String(event.id || ""),
-    server: server,
-    server_name: SERVERS[server] || server,
-
-    title: event.title || "",
-    description: event.description || "",
-
-    banner: event.banner || null,
-
-    type: event.type || "event",
-
-    start_at: startAt,
-    end_at: endAt,
-
-    status: status,
-
-    remaining: remaining,
-
-    rewards: Array.isArray(event.rewards)
-      ? event.rewards
-      : [],
-
-    source: event.source || null
-  };
-}
-
 
 /*
- * ============================================================
- * LẤY EVENT
- * ============================================================
- */
+|--------------------------------------------------------------------------
+| NORMALIZE EVENT
+|--------------------------------------------------------------------------
+*/
 
-async function getEvents() {
-  /*
-   * Hiện tại sử dụng DATA_SOURCE.
-   *
-   * Nếu sau này bạn có API nguồn dữ liệu thực tế,
-   * có thể thay phần này bằng fetch().
-   */
+function normalizeEvent(event, server) {
+  const startAt =
+    event.start_at ||
+    event.startAt ||
+    null;
 
+  const endAt =
+    event.end_at ||
+    event.endAt ||
+    null;
+
+  const status =
+    getStatus(startAt, endAt);
+
+  return {
+    id: String(
+      event.id || ""
+    ),
+
+    server,
+
+    server_name:
+      SERVERS[server] || server,
+
+    title:
+      event.title || "",
+
+    description:
+      event.description || "",
+
+    banner:
+      event.banner || null,
+
+    type:
+      event.type || "event",
+
+    start_at:
+      startAt,
+
+    end_at:
+      endAt,
+
+    status,
+
+    countdown:
+      getCountdown(
+        startAt,
+        endAt
+      ),
+
+    rewards:
+      Array.isArray(event.rewards)
+        ? event.rewards
+        : [],
+
+    source:
+      event.source || null
+  };
+}
+
+/*
+|--------------------------------------------------------------------------
+| GET ALL EVENTS
+|--------------------------------------------------------------------------
+*/
+
+function getAllEvents() {
   const result = [];
 
-  for (const server of Object.keys(SERVERS)) {
-    const events = Array.isArray(DATA_SOURCE[server])
-      ? DATA_SOURCE[server]
-      : [];
+  Object.keys(SERVERS).forEach(server => {
 
-    for (const event of events) {
+    const list =
+      Array.isArray(EVENTS[server])
+        ? EVENTS[server]
+        : [];
+
+    list.forEach(event => {
+
       result.push(
-        normalizeEvent(event, server)
+        normalizeEvent(
+          event,
+          server
+        )
       );
-    }
-  }
+
+    });
+
+  });
 
   return result;
 }
 
-
 /*
- * ============================================================
- * SORT EVENT
- * ============================================================
- */
+|--------------------------------------------------------------------------
+| SORT
+|--------------------------------------------------------------------------
+*/
 
 function sortEvents(events) {
-  const order = {
-    ACTIVE: 0,
-    UPCOMING: 1,
-    ENDED: 2,
-    UNKNOWN: 3
+
+  const priority = {
+    ACTIVE: 1,
+    UPCOMING: 2,
+    ENDED: 3,
+    UNKNOWN: 4
   };
 
   return events.sort((a, b) => {
 
-    const statusA = order[a.status] ?? 99;
-    const statusB = order[b.status] ?? 99;
+    const pA =
+      priority[a.status] || 99;
 
-    if (statusA !== statusB) {
-      return statusA - statusB;
+    const pB =
+      priority[b.status] || 99;
+
+    if (pA !== pB) {
+      return pA - pB;
     }
 
-    const dateA = parseDate(a.start_at);
-    const dateB = parseDate(b.start_at);
+    const aDate =
+      toDate(a.start_at);
 
-    const timeA = dateA
-      ? dateA.getTime()
-      : Number.MAX_SAFE_INTEGER;
+    const bDate =
+      toDate(b.start_at);
 
-    const timeB = dateB
-      ? dateB.getTime()
-      : Number.MAX_SAFE_INTEGER;
+    const aTime =
+      aDate
+        ? aDate.getTime()
+        : Number.MAX_SAFE_INTEGER;
 
-    return timeA - timeB;
+    const bTime =
+      bDate
+        ? bDate.getTime()
+        : Number.MAX_SAFE_INTEGER;
+
+    return aTime - bTime;
   });
 }
 
-
 /*
- * ============================================================
- * API HANDLER
- * ============================================================
- */
+|--------------------------------------------------------------------------
+| HANDLER
+|--------------------------------------------------------------------------
+*/
 
-module.exports = async function handler(req, res) {
+module.exports = function handler(req, res) {
 
   /*
-   * CORS
-   */
+  |--------------------------------------------------------------------------
+  | CORS
+  |--------------------------------------------------------------------------
+  */
 
   res.setHeader(
     "Access-Control-Allow-Origin",
@@ -278,224 +320,312 @@ module.exports = async function handler(req, res) {
   );
 
   /*
-   * OPTIONS
-   */
+  |--------------------------------------------------------------------------
+  | OPTIONS
+  |--------------------------------------------------------------------------
+  */
 
   if (req.method === "OPTIONS") {
     return res.status(204).end();
   }
 
   /*
-   * Chỉ cho GET
-   */
+  |--------------------------------------------------------------------------
+  | METHOD
+  |--------------------------------------------------------------------------
+  */
 
   if (req.method !== "GET") {
     return res.status(405).json({
       success: false,
       error: "METHOD_NOT_ALLOWED",
-      message: "API chỉ hỗ trợ phương thức GET."
+      message:
+        "Chỉ hỗ trợ phương thức GET."
     });
   }
 
   try {
 
-    const {
-      server = "all",
-      status = "all",
-      type = "all",
-      q = "",
-      include_ended = "true"
-    } = req.query || {};
-
     /*
-     * Kiểm tra server
-     */
+    |--------------------------------------------------------------------------
+    | QUERY
+    |--------------------------------------------------------------------------
+    */
 
-    const normalizedServer =
-      String(server).trim().toUpperCase();
+    const server =
+      String(
+        req.query.server || "all"
+      ).trim().toUpperCase();
 
-    if (
-      normalizedServer !== "ALL" &&
-      !SERVERS[normalizedServer]
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "INVALID_SERVER",
-        message: "Server không hợp lệ.",
-        available_servers: Object.keys(SERVERS)
-      });
-    }
+    const status =
+      String(
+        req.query.status || "all"
+      ).trim().toUpperCase();
 
-    /*
-     * Lấy dữ liệu
-     */
-
-    let events = await getEvents();
-
-    /*
-     * Filter server
-     */
-
-    if (normalizedServer !== "ALL") {
-      events = events.filter(
-        event =>
-          event.server === normalizedServer
-      );
-    }
-
-    /*
-     * Filter status
-     */
-
-    const normalizedStatus =
-      String(status).trim().toUpperCase();
-
-    if (normalizedStatus !== "ALL") {
-
-      const allowedStatus = [
-        "ACTIVE",
-        "UPCOMING",
-        "ENDED",
-        "UNKNOWN"
-      ];
-
-      if (!allowedStatus.includes(normalizedStatus)) {
-        return res.status(400).json({
-          success: false,
-          error: "INVALID_STATUS",
-          message: "Status không hợp lệ.",
-          available_status: allowedStatus
-        });
-      }
-
-      events = events.filter(
-        event =>
-          event.status === normalizedStatus
-      );
-    }
-
-    /*
-     * Filter type
-     */
-
-    if (
-      String(type).trim().toLowerCase() !== "all"
-    ) {
-
-      const requestedType =
-        String(type).trim().toLowerCase();
-
-      events = events.filter(
-        event =>
-          String(event.type)
-            .toLowerCase() === requestedType
-      );
-    }
-
-    /*
-     * Search
-     */
+    const type =
+      String(
+        req.query.type || "all"
+      ).trim().toLowerCase();
 
     const search =
-      String(q).trim().toLowerCase();
+      String(
+        req.query.q || ""
+      ).trim().toLowerCase();
+
+    const includeEnded =
+      String(
+        req.query.include_ended || "true"
+      ).toLowerCase() !== "false";
+
+    /*
+    |--------------------------------------------------------------------------
+    | CHECK SERVER
+    |--------------------------------------------------------------------------
+    */
+
+    if (
+      server !== "ALL" &&
+      !SERVERS[server]
+    ) {
+
+      return res.status(400).json({
+
+        success: false,
+
+        error:
+          "INVALID_SERVER",
+
+        message:
+          "Server không tồn tại.",
+
+        available_servers:
+          Object.keys(SERVERS)
+
+      });
+
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | CHECK STATUS
+    |--------------------------------------------------------------------------
+    */
+
+    const validStatuses = [
+      "ALL",
+      "ACTIVE",
+      "UPCOMING",
+      "ENDED",
+      "UNKNOWN"
+    ];
+
+    if (!validStatuses.includes(status)) {
+
+      return res.status(400).json({
+
+        success: false,
+
+        error:
+          "INVALID_STATUS",
+
+        available_status:
+          validStatuses
+
+      });
+
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | LOAD
+    |--------------------------------------------------------------------------
+    */
+
+    let events =
+      getAllEvents();
+
+    /*
+    |--------------------------------------------------------------------------
+    | SERVER FILTER
+    |--------------------------------------------------------------------------
+    */
+
+    if (server !== "ALL") {
+
+      events =
+        events.filter(
+          event =>
+            event.server === server
+        );
+
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | STATUS FILTER
+    |--------------------------------------------------------------------------
+    */
+
+    if (status !== "ALL") {
+
+      events =
+        events.filter(
+          event =>
+            event.status === status
+        );
+
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | TYPE FILTER
+    |--------------------------------------------------------------------------
+    */
+
+    if (type !== "all") {
+
+      events =
+        events.filter(
+          event =>
+            String(
+              event.type
+            ).toLowerCase() === type
+        );
+
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | SEARCH
+    |--------------------------------------------------------------------------
+    */
 
     if (search) {
 
-      events = events.filter(event => {
+      events =
+        events.filter(event => {
 
-        const text = [
-          event.id,
-          event.title,
-          event.description,
-          event.type,
-          event.server,
-          event.server_name
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
+          const text = [
 
-        return text.includes(search);
-      });
+            event.id,
+
+            event.title,
+
+            event.description,
+
+            event.type,
+
+            event.server,
+
+            event.server_name
+
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+
+          return text.includes(search);
+
+        });
+
     }
 
     /*
-     * include_ended
-     */
+    |--------------------------------------------------------------------------
+    | HIDE ENDED
+    |--------------------------------------------------------------------------
+    */
 
-    if (
-      String(include_ended).toLowerCase() === "false"
-    ) {
-      events = events.filter(
-        event =>
-          event.status !== "ENDED"
-      );
+    if (!includeEnded) {
+
+      events =
+        events.filter(
+          event =>
+            event.status !== "ENDED"
+        );
+
     }
 
     /*
-     * Sort
-     */
+    |--------------------------------------------------------------------------
+    | SORT
+    |--------------------------------------------------------------------------
+    */
 
-    events = sortEvents(events);
-
-    /*
-     * Thời gian server
-     */
-
-    const now = new Date();
+    events =
+      sortEvents(events);
 
     /*
-     * Response
-     */
+    |--------------------------------------------------------------------------
+    | RESPONSE
+    |--------------------------------------------------------------------------
+    */
 
     return res.status(200).json({
 
       success: true,
 
       api: {
-        name: "Free Fire Events API",
-        version: "1.0.0"
+        name:
+          "Free Fire Events API",
+
+        version:
+          "1.0.0",
+
+        mode:
+          "API_ONLY"
       },
 
-      generated_at: now.toISOString(),
+      generated_at:
+        new Date().toISOString(),
 
-      timezone: "Asia/Ho_Chi_Minh",
+      timezone:
+        "Asia/Ho_Chi_Minh",
 
       request: {
-        server: normalizedServer,
-        status: normalizedStatus,
-        type: type,
-        search: search || null,
+
+        server,
+
+        status,
+
+        type,
+
+        search:
+          search || null,
+
         include_ended:
-          String(include_ended).toLowerCase() !== "false"
+          includeEnded
+
       },
 
-      servers: SERVERS,
+      servers:
+        SERVERS,
 
-      total: events.length,
+      total:
+        events.length,
 
-      events: events
+      events
 
     });
 
   } catch (error) {
 
-    console.error(error);
+    console.error(
+      "Free Fire Events API Error:",
+      error
+    );
 
     return res.status(500).json({
 
       success: false,
 
-      error: "INTERNAL_SERVER_ERROR",
+      error:
+        "INTERNAL_SERVER_ERROR",
 
       message:
-        "Không thể đọc dữ liệu sự kiện.",
-
-      detail:
-        process.env.NODE_ENV === "development"
-          ? error.message
-          : undefined
+        "Không thể xử lý dữ liệu sự kiện."
 
     });
+
   }
 };

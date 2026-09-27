@@ -1,14 +1,3 @@
 {
-  "version": 2,
-  "functions": {
-    "api/events.js": {
-      "runtime": "nodejs20.x"
-    }
-  },
-  "routes": [
-    {
-      "src": "/api/events",
-      "dest": "/api/events.js"
-    }
-  ]
+  "$schema": "https://openapi.vercel.sh/vercel.json"
 }

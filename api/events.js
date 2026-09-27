@@ -1,15 +1,3 @@
-/**
- * FREE FIRE EVENTS API
- * API ONLY - VERCEL
- *
- * Endpoint:
- * /api/events
- * /api/events?server=VN
- * /api/events?server=VN&status=ACTIVE
- * /api/events?server=all
- * /api/events?q=keyword
- */
-
 const SERVERS = {
   VN: "Vietnam",
   TH: "Thailand",
@@ -27,19 +15,6 @@ const SERVERS = {
   LATAM: "Latin America",
   CIS: "CIS"
 };
-
-/*
-|--------------------------------------------------------------------------
-| DỮ LIỆU
-|--------------------------------------------------------------------------
-|
-| Đây là nơi API nhận dữ liệu event.
-|
-| Bạn có thể kết nối nguồn dữ liệu thực tế vào đây.
-|
-| Không tự tạo event giả để đại diện cho dữ liệu chính thức của Free Fire.
-|
-*/
 
 const EVENTS = {
   VN: [],
@@ -59,250 +34,123 @@ const EVENTS = {
   CIS: []
 };
 
-/*
-|--------------------------------------------------------------------------
-| DATE
-|--------------------------------------------------------------------------
-*/
-
-function toDate(value) {
+function date(value) {
   if (!value) return null;
 
-  const date = new Date(value);
+  const d = new Date(value);
 
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  return date;
+  return Number.isNaN(d.getTime())
+    ? null
+    : d;
 }
 
-/*
-|--------------------------------------------------------------------------
-| STATUS
-|--------------------------------------------------------------------------
-*/
-
-function getStatus(startAt, endAt) {
+function getStatus(start, end) {
   const now = Date.now();
 
-  const start = toDate(startAt);
-  const end = toDate(endAt);
+  const s = date(start);
+  const e = date(end);
 
-  if (!start || !end) {
+  if (!s || !e) {
     return "UNKNOWN";
   }
 
-  if (now < start.getTime()) {
+  if (now < s.getTime()) {
     return "UPCOMING";
   }
 
-  if (now <= end.getTime()) {
+  if (now <= e.getTime()) {
     return "ACTIVE";
   }
 
   return "ENDED";
 }
 
-/*
-|--------------------------------------------------------------------------
-| COUNTDOWN
-|--------------------------------------------------------------------------
-*/
-
-function getCountdown(startAt, endAt) {
+function countdown(start, end) {
   const now = Date.now();
 
-  const start = toDate(startAt);
-  const end = toDate(endAt);
+  const s = date(start);
+  const e = date(end);
 
-  if (!start || !end) {
-    return {
-      milliseconds: null,
-      seconds: null,
-      minutes: null,
-      hours: null,
-      days: null
-    };
+  if (!s || !e) {
+    return null;
   }
 
-  let milliseconds;
+  let remaining = 0;
 
-  if (now < start.getTime()) {
-    milliseconds = start.getTime() - now;
-  } else if (now <= end.getTime()) {
-    milliseconds = end.getTime() - now;
-  } else {
-    milliseconds = 0;
+  if (now < s.getTime()) {
+    remaining = s.getTime() - now;
+  } else if (now < e.getTime()) {
+    remaining = e.getTime() - now;
   }
 
   return {
-    milliseconds,
-    seconds: Math.floor(milliseconds / 1000),
-    minutes: Math.floor(milliseconds / 60000),
-    hours: Math.floor(milliseconds / 3600000),
-    days: Math.floor(milliseconds / 86400000)
+    milliseconds: remaining,
+    seconds: Math.floor(remaining / 1000),
+    minutes: Math.floor(remaining / 60000),
+    hours: Math.floor(remaining / 3600000),
+    days: Math.floor(remaining / 86400000)
   };
 }
 
-/*
-|--------------------------------------------------------------------------
-| NORMALIZE EVENT
-|--------------------------------------------------------------------------
-*/
-
-function normalizeEvent(event, server) {
-  const startAt =
+function normalize(event, server) {
+  const start =
     event.start_at ||
     event.startAt ||
     null;
 
-  const endAt =
+  const end =
     event.end_at ||
     event.endAt ||
     null;
 
-  const status =
-    getStatus(startAt, endAt);
-
   return {
-    id: String(
-      event.id || ""
-    ),
-
+    id: String(event.id || ""),
     server,
+    server_name: SERVERS[server],
 
-    server_name:
-      SERVERS[server] || server,
+    title: event.title || "",
+    description: event.description || "",
 
-    title:
-      event.title || "",
+    banner: event.banner || null,
 
-    description:
-      event.description || "",
+    type: event.type || "event",
 
-    banner:
-      event.banner || null,
+    start_at: start,
+    end_at: end,
 
-    type:
-      event.type || "event",
+    status: getStatus(start, end),
 
-    start_at:
-      startAt,
+    countdown: countdown(start, end),
 
-    end_at:
-      endAt,
+    rewards: Array.isArray(event.rewards)
+      ? event.rewards
+      : [],
 
-    status,
-
-    countdown:
-      getCountdown(
-        startAt,
-        endAt
-      ),
-
-    rewards:
-      Array.isArray(event.rewards)
-        ? event.rewards
-        : [],
-
-    source:
-      event.source || null
+    source: event.source || null
   };
 }
 
-/*
-|--------------------------------------------------------------------------
-| GET ALL EVENTS
-|--------------------------------------------------------------------------
-*/
-
-function getAllEvents() {
+function allEvents() {
   const result = [];
 
-  Object.keys(SERVERS).forEach(server => {
+  for (const server of Object.keys(SERVERS)) {
+    const list = EVENTS[server];
 
-    const list =
-      Array.isArray(EVENTS[server])
-        ? EVENTS[server]
-        : [];
+    if (!Array.isArray(list)) {
+      continue;
+    }
 
-    list.forEach(event => {
-
+    for (const event of list) {
       result.push(
-        normalizeEvent(
-          event,
-          server
-        )
+        normalize(event, server)
       );
-
-    });
-
-  });
+    }
+  }
 
   return result;
 }
 
-/*
-|--------------------------------------------------------------------------
-| SORT
-|--------------------------------------------------------------------------
-*/
-
-function sortEvents(events) {
-
-  const priority = {
-    ACTIVE: 1,
-    UPCOMING: 2,
-    ENDED: 3,
-    UNKNOWN: 4
-  };
-
-  return events.sort((a, b) => {
-
-    const pA =
-      priority[a.status] || 99;
-
-    const pB =
-      priority[b.status] || 99;
-
-    if (pA !== pB) {
-      return pA - pB;
-    }
-
-    const aDate =
-      toDate(a.start_at);
-
-    const bDate =
-      toDate(b.start_at);
-
-    const aTime =
-      aDate
-        ? aDate.getTime()
-        : Number.MAX_SAFE_INTEGER;
-
-    const bTime =
-      bDate
-        ? bDate.getTime()
-        : Number.MAX_SAFE_INTEGER;
-
-    return aTime - bTime;
-  });
-}
-
-/*
-|--------------------------------------------------------------------------
-| HANDLER
-|--------------------------------------------------------------------------
-*/
-
 module.exports = function handler(req, res) {
-
-  /*
-  |--------------------------------------------------------------------------
-  | CORS
-  |--------------------------------------------------------------------------
-  */
 
   res.setHeader(
     "Access-Control-Allow-Origin",
@@ -319,97 +167,51 @@ module.exports = function handler(req, res) {
     "Content-Type"
   );
 
-  /*
-  |--------------------------------------------------------------------------
-  | OPTIONS
-  |--------------------------------------------------------------------------
-  */
-
   if (req.method === "OPTIONS") {
     return res.status(204).end();
   }
 
-  /*
-  |--------------------------------------------------------------------------
-  | METHOD
-  |--------------------------------------------------------------------------
-  */
-
   if (req.method !== "GET") {
     return res.status(405).json({
       success: false,
-      error: "METHOD_NOT_ALLOWED",
-      message:
-        "Chỉ hỗ trợ phương thức GET."
+      error: "METHOD_NOT_ALLOWED"
     });
   }
 
   try {
 
-    /*
-    |--------------------------------------------------------------------------
-    | QUERY
-    |--------------------------------------------------------------------------
-    */
-
     const server =
       String(
-        req.query.server || "all"
-      ).trim().toUpperCase();
+        req.query?.server || "all"
+      ).toUpperCase();
 
     const status =
       String(
-        req.query.status || "all"
-      ).trim().toUpperCase();
-
-    const type =
-      String(
-        req.query.type || "all"
-      ).trim().toLowerCase();
+        req.query?.status || "all"
+      ).toUpperCase();
 
     const search =
       String(
-        req.query.q || ""
-      ).trim().toLowerCase();
+        req.query?.q || ""
+      ).toLowerCase()
+      .trim();
 
     const includeEnded =
       String(
-        req.query.include_ended || "true"
+        req.query?.include_ended || "true"
       ).toLowerCase() !== "false";
-
-    /*
-    |--------------------------------------------------------------------------
-    | CHECK SERVER
-    |--------------------------------------------------------------------------
-    */
 
     if (
       server !== "ALL" &&
       !SERVERS[server]
     ) {
-
       return res.status(400).json({
-
         success: false,
-
-        error:
-          "INVALID_SERVER",
-
-        message:
-          "Server không tồn tại.",
-
+        error: "INVALID_SERVER",
         available_servers:
           Object.keys(SERVERS)
-
       });
-
     }
-
-    /*
-    |--------------------------------------------------------------------------
-    | CHECK STATUS
-    |--------------------------------------------------------------------------
-    */
 
     const validStatuses = [
       "ALL",
@@ -420,160 +222,77 @@ module.exports = function handler(req, res) {
     ];
 
     if (!validStatuses.includes(status)) {
-
       return res.status(400).json({
-
         success: false,
-
-        error:
-          "INVALID_STATUS",
-
+        error: "INVALID_STATUS",
         available_status:
           validStatuses
-
       });
-
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | LOAD
-    |--------------------------------------------------------------------------
-    */
-
-    let events =
-      getAllEvents();
-
-    /*
-    |--------------------------------------------------------------------------
-    | SERVER FILTER
-    |--------------------------------------------------------------------------
-    */
+    let events = allEvents();
 
     if (server !== "ALL") {
-
-      events =
-        events.filter(
-          event =>
-            event.server === server
-        );
-
+      events = events.filter(
+        event =>
+          event.server === server
+      );
     }
-
-    /*
-    |--------------------------------------------------------------------------
-    | STATUS FILTER
-    |--------------------------------------------------------------------------
-    */
 
     if (status !== "ALL") {
-
-      events =
-        events.filter(
-          event =>
-            event.status === status
-        );
-
+      events = events.filter(
+        event =>
+          event.status === status
+      );
     }
-
-    /*
-    |--------------------------------------------------------------------------
-    | TYPE FILTER
-    |--------------------------------------------------------------------------
-    */
-
-    if (type !== "all") {
-
-      events =
-        events.filter(
-          event =>
-            String(
-              event.type
-            ).toLowerCase() === type
-        );
-
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | SEARCH
-    |--------------------------------------------------------------------------
-    */
-
-    if (search) {
-
-      events =
-        events.filter(event => {
-
-          const text = [
-
-            event.id,
-
-            event.title,
-
-            event.description,
-
-            event.type,
-
-            event.server,
-
-            event.server_name
-
-          ]
-            .filter(Boolean)
-            .join(" ")
-            .toLowerCase();
-
-          return text.includes(search);
-
-        });
-
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | HIDE ENDED
-    |--------------------------------------------------------------------------
-    */
 
     if (!includeEnded) {
-
-      events =
-        events.filter(
-          event =>
-            event.status !== "ENDED"
-        );
-
+      events = events.filter(
+        event =>
+          event.status !== "ENDED"
+      );
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | SORT
-    |--------------------------------------------------------------------------
-    */
+    if (search) {
+      events = events.filter(event => {
 
-    events =
-      sortEvents(events);
+        const text = [
+          event.id,
+          event.title,
+          event.description,
+          event.type,
+          event.server,
+          event.server_name
+        ]
+          .join(" ")
+          .toLowerCase();
 
-    /*
-    |--------------------------------------------------------------------------
-    | RESPONSE
-    |--------------------------------------------------------------------------
-    */
+        return text.includes(search);
+      });
+    }
+
+    const priority = {
+      ACTIVE: 1,
+      UPCOMING: 2,
+      ENDED: 3,
+      UNKNOWN: 4
+    };
+
+    events.sort((a, b) => {
+      return (
+        (priority[a.status] || 99) -
+        (priority[b.status] || 99)
+      );
+    });
 
     return res.status(200).json({
 
       success: true,
 
       api: {
-        name:
-          "Free Fire Events API",
-
-        version:
-          "1.0.0",
-
-        mode:
-          "API_ONLY"
+        name: "Free Fire Events API",
+        version: "1.0.0",
+        mode: "API_ONLY"
       },
 
       generated_at:
@@ -583,26 +302,15 @@ module.exports = function handler(req, res) {
         "Asia/Ho_Chi_Minh",
 
       request: {
-
         server,
-
         status,
-
-        type,
-
-        search:
-          search || null,
-
-        include_ended:
-          includeEnded
-
+        search: search || null,
+        include_ended: includeEnded
       },
 
-      servers:
-        SERVERS,
+      servers: SERVERS,
 
-      total:
-        events.length,
+      total: events.length,
 
       events
 
@@ -610,22 +318,13 @@ module.exports = function handler(req, res) {
 
   } catch (error) {
 
-    console.error(
-      "Free Fire Events API Error:",
-      error
-    );
+    console.error(error);
 
     return res.status(500).json({
-
       success: false,
-
-      error:
-        "INTERNAL_SERVER_ERROR",
-
+      error: "INTERNAL_SERVER_ERROR",
       message:
-        "Không thể xử lý dữ liệu sự kiện."
-
+        "Không thể xử lý API."
     });
-
   }
 };

@@ -1,17 +1,16 @@
 // api/events.js
-// FFVN.TGM - Free Fire Events API
-// Vercel Serverless Function - Node.js
+// FFVN.TGM - FREE FIRE EVENTS API
+// Vercel Serverless Function
+// Không cần ?key=...
 
 const NENCER_API_URL = "https://api.nencer.vn/ff/events";
 
-// Cache trong bộ nhớ của instance Vercel.
-// Không đảm bảo tồn tại giữa mọi lần cold start.
+const CACHE_TTL = 60 * 1000;
+
 let cache = {
   data: null,
   expiresAt: 0
 };
-
-const CACHE_TTL = 60 * 1000; // 60 giây
 
 const SERVERS = {
   VN: "Việt Nam",
@@ -31,50 +30,47 @@ const SERVERS = {
   CIS: "CIS"
 };
 
-function sendJSON(res, status, data) {
-  return res.status(status).json(data);
+function json(res, status, data) {
+  res.status(status);
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  return res.json(data);
 }
 
-function getQuery(req, name, fallback = "") {
-  if (!req.query) return fallback;
-
-  const value = req.query[name];
+function query(req, key) {
+  const value = req.query?.[key];
 
   if (Array.isArray(value)) {
-    return String(value[0] || fallback);
+    return String(value[0] || "");
   }
 
-  return value == null ? fallback : String(value);
+  return value == null ? "" : String(value);
 }
 
-function parseDate(value) {
+function date(value) {
   if (!value) return null;
 
-  const date = new Date(value);
+  const d = new Date(value);
 
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  return date;
+  return Number.isNaN(d.getTime())
+    ? null
+    : d;
 }
 
-function getStatus(start, end) {
+function statusOf(start, end) {
   const now = Date.now();
 
-  const startTime = start ? start.getTime() : null;
-  const endTime = end ? end.getTime() : null;
-
-  if (endTime && now >= endTime) {
+  if (end && now >= end.getTime()) {
     return "ENDED";
   }
 
-  if (startTime && now < startTime) {
+  if (start && now < start.getTime()) {
     return "UPCOMING";
   }
 
-  if (startTime && (!endTime || now < endTime)) {
-    return "ACTIVE";
+  if (start && now >= start.getTime()) {
+    if (!end || now < end.getTime()) {
+      return "ACTIVE";
+    }
   }
 
   return "UNKNOWN";
@@ -85,7 +81,6 @@ function normalizeEvent(item, index) {
     return null;
   }
 
-  // Hỗ trợ nhiều cách đặt tên trường từ upstream.
   const id =
     item.id ??
     item.event_id ??
@@ -141,11 +136,8 @@ function normalizeEvent(item, index) {
     item.to ??
     null;
 
-  const start = parseDate(startRaw);
-  const end = parseDate(endRaw);
-
-  // Không tự tạo ngày giờ nếu upstream không cung cấp.
-  const status = getStatus(start, end);
+  const start = date(startRaw);
+  const end = date(endRaw);
 
   return {
     id: String(id),
@@ -154,10 +146,15 @@ function normalizeEvent(item, index) {
     type: String(type),
     image,
 
-    start_at: start ? start.toISOString() : null,
-    end_at: end ? end.toISOString() : null,
+    start_at: start
+      ? start.toISOString()
+      : null,
 
-    status,
+    end_at: end
+      ? end.toISOString()
+      : null,
+
+    status: statusOf(start, end),
 
     source: "Nencer API",
 
@@ -174,7 +171,7 @@ function extractEvents(payload) {
     return [];
   }
 
-  const possibleArrays = [
+  const candidates = [
     payload.data,
     payload.events,
     payload.items,
@@ -182,15 +179,12 @@ function extractEvents(payload) {
     payload.result
   ];
 
-  for (const value of possibleArrays) {
+  for (const value of candidates) {
     if (Array.isArray(value)) {
       return value;
     }
 
-    if (
-      value &&
-      typeof value === "object"
-    ) {
+    if (value && typeof value === "object") {
       if (Array.isArray(value.events)) {
         return value.events;
       }
@@ -208,16 +202,14 @@ function extractEvents(payload) {
   return [];
 }
 
-function normalizeRegion(value) {
-  if (!value) return null;
-
-  return String(value)
+function normalizeCode(value) {
+  return String(value || "")
     .trim()
     .toUpperCase();
 }
 
-function getEventServers(item) {
-  const possible =
+function getServerCodes(item) {
+  const value =
     item.servers ??
     item.server ??
     item.regions ??
@@ -228,87 +220,85 @@ function getEventServers(item) {
     item.countries ??
     null;
 
-  if (!possible) {
+  if (!value) {
     return [];
   }
 
-  if (Array.isArray(possible)) {
-    return possible
-      .flatMap(value => {
-        if (
-          value &&
-          typeof value === "object"
-        ) {
+  if (Array.isArray(value)) {
+    return value
+      .flatMap(v => {
+        if (v && typeof v === "object") {
           return [
-            value.code,
-            value.region,
-            value.server,
-            value.country
+            v.code,
+            v.region,
+            v.server,
+            v.country
           ];
         }
 
-        return [value];
+        return [v];
       })
       .filter(Boolean)
-      .map(normalizeRegion);
+      .map(normalizeCode);
   }
 
-  if (typeof possible === "object") {
+  if (typeof value === "object") {
     return [
-      possible.code,
-      possible.region,
-      possible.server,
-      possible.country
+      value.code,
+      value.region,
+      value.server,
+      value.country
     ]
       .filter(Boolean)
-      .map(normalizeRegion);
+      .map(normalizeCode);
   }
 
-  return String(possible)
+  return String(value)
     .split(/[,\s|]+/)
     .filter(Boolean)
-    .map(normalizeRegion);
+    .map(normalizeCode);
 }
 
-function eventMatchesServer(event, server) {
+function belongsToServer(event, server) {
   if (!server) {
     return true;
   }
 
-  const raw = event.raw || {};
-  const regions = getEventServers(raw);
+  const codes =
+    getServerCodes(event.raw || {});
 
-  // Nếu upstream không cung cấp thông tin server,
-  // không giả mạo rằng event thuộc server đó.
-  if (regions.length === 0) {
+  /*
+   * Không tự bịa server.
+   * Chỉ trả event cho server nếu upstream
+   * thực sự cung cấp thông tin server/region.
+   */
+  if (codes.length === 0) {
     return false;
   }
 
-  return regions.includes(server);
+  return codes.includes(server);
 }
 
-function applyFilters(events, req) {
-  const server = normalizeRegion(
-    getQuery(req, "server")
-  );
+function filterEvents(events, req) {
+  const server =
+    normalizeCode(query(req, "server"));
 
-  const status = normalizeRegion(
-    getQuery(req, "status")
-  );
+  const status =
+    normalizeCode(query(req, "status"));
 
-  const type = normalizeRegion(
-    getQuery(req, "type")
-  );
+  const type =
+    normalizeCode(query(req, "type"));
 
-  const search = getQuery(req, "search")
-    .trim()
-    .toLowerCase();
+  const search =
+    query(req, "search")
+      .trim()
+      .toLowerCase();
 
   let result = events;
 
   if (server) {
     result = result.filter(event =>
-      eventMatchesServer(event, server)
+      belongsToServer(event, server)
     );
   }
 
@@ -320,7 +310,8 @@ function applyFilters(events, req) {
 
   if (type) {
     result = result.filter(event =>
-      String(event.type).toUpperCase() === type
+      String(event.type)
+        .toUpperCase() === type
     );
   }
 
@@ -342,20 +333,22 @@ function applyFilters(events, req) {
   return result;
 }
 
-async function fetchNencerEvents() {
-  const apiKey = process.env.NENCER_API_KEY;
+async function requestNencer() {
+  const apiKey =
+    process.env.NENCER_API_KEY;
 
   if (!apiKey) {
     const error = new Error(
-      "NENCER_API_KEY chưa được cấu hình trên Vercel."
+      "NENCER_API_KEY chưa được cấu hình."
     );
 
-    error.code = "MISSING_API_KEY";
+    error.code = "NO_NENCER_KEY";
 
     throw error;
   }
 
-  const url = new URL(NENCER_API_URL);
+  const url =
+    new URL(NENCER_API_URL);
 
   url.searchParams.set(
     "api_key",
@@ -365,38 +358,36 @@ async function fetchNencerEvents() {
   const controller =
     new AbortController();
 
-  const timeout = setTimeout(
-    () => controller.abort(),
-    10000
-  );
+  const timeout =
+    setTimeout(() => {
+      controller.abort();
+    }, 10000);
 
   try {
-    const response = await fetch(
-      url.toString(),
-      {
+    const response =
+      await fetch(url.toString(), {
         method: "GET",
         headers: {
           Accept: "application/json"
         },
         signal: controller.signal
-      }
-    );
+      });
 
-    const text = await response.text();
+    const text =
+      await response.text();
 
     let payload;
 
     try {
-      payload = text
-        ? JSON.parse(text)
-        : null;
+      payload =
+        text ? JSON.parse(text) : null;
     } catch {
       const error = new Error(
-        "Nencer trả về dữ liệu không phải JSON."
+        "Nencer không trả về JSON hợp lệ."
       );
 
-      error.code = "UPSTREAM_INVALID_JSON";
-      error.status = response.status;
+      error.code =
+        "INVALID_UPSTREAM_JSON";
 
       throw error;
     }
@@ -408,25 +399,28 @@ async function fetchNencerEvents() {
         `Nencer HTTP ${response.status}`
       );
 
-      error.code =
+      error.status =
+        response.status;
+
+      if (
         response.status === 401 ||
         response.status === 403
-          ? "INVALID_NENCER_API_KEY"
-          : `NENCER_HTTP_${response.status}`;
-
-      error.status = response.status;
-      error.payload = payload;
+      ) {
+        error.code =
+          "INVALID_NENCER_KEY";
+      }
 
       throw error;
     }
 
     return payload;
+
   } finally {
     clearTimeout(timeout);
   }
 }
 
-async function getEvents() {
+async function getData() {
   const now = Date.now();
 
   if (
@@ -434,20 +428,21 @@ async function getEvents() {
     cache.expiresAt > now
   ) {
     return {
-      payload: cache.data,
+      data: cache.data,
       cached: true
     };
   }
 
-  const payload =
-    await fetchNencerEvents();
+  const data =
+    await requestNencer();
 
-  cache.data = payload;
+  cache.data = data;
+
   cache.expiresAt =
     now + CACHE_TTL;
 
   return {
-    payload,
+    data,
     cached: false
   };
 }
@@ -472,159 +467,136 @@ module.exports = async function handler(
     "Content-Type"
   );
 
-  // Preflight
+  // OPTIONS
   if (req.method === "OPTIONS") {
     return res.status(204).end();
   }
 
-  // Chỉ GET
+  // GET only
   if (req.method !== "GET") {
-    return sendJSON(res, 405, {
+    return json(res, 405, {
       success: false,
       error: "METHOD_NOT_ALLOWED",
-      message: "API này chỉ hỗ trợ GET."
+      message:
+        "Chỉ hỗ trợ phương thức GET."
     });
-  }
-
-  // Key riêng của API FFVN.TGM
-  const clientKey =
-    getQuery(req, "key");
-
-  const privateKey =
-    process.env.FFVNTGM_API_KEY;
-
-  if (privateKey) {
-    if (clientKey !== privateKey) {
-      return sendJSON(res, 401, {
-        success: false,
-        error: "INVALID_API_KEY",
-        message: "API key FFVNTGM không hợp lệ."
-      });
-    }
   }
 
   try {
     const result =
-      await getEvents();
+      await getData();
 
     const rawEvents =
-      extractEvents(result.payload);
+      extractEvents(result.data);
 
-    const normalized =
+    const events =
       rawEvents
         .map(normalizeEvent)
         .filter(Boolean);
 
     const filtered =
-      applyFilters(
-        normalized,
-        req
-      );
+      filterEvents(events, req);
 
     const server =
-      normalizeRegion(
-        getQuery(req, "server")
+      normalizeCode(
+        query(req, "server")
       );
 
-    const response = {
+    const status =
+      query(req, "status");
+
+    const type =
+      query(req, "type");
+
+    const search =
+      query(req, "search");
+
+    return json(res, 200, {
       success: true,
 
       api: {
         name:
           "FFVN.TGM Free Fire Events API",
-        version: "2.1.0",
+        version: "3.0.0",
         mode: "API_ONLY"
       },
 
       source: {
-        provider: "Nencer Software",
+        provider:
+          "Nencer Software",
         endpoint:
           NENCER_API_URL,
-        cached: result.cached
+        cache:
+          result.cached,
+        cache_ttl_seconds: 60
       },
 
       request: {
         server: server || null,
-        status:
-          getQuery(req, "status") || null,
-        type:
-          getQuery(req, "type") || null,
-        search:
-          getQuery(req, "search") || null
+        status: status || null,
+        type: type || null,
+        search: search || null
       },
 
-      servers: Object.entries(
-        SERVERS
-      ).map(([code, name]) => ({
-        code,
-        name
-      })),
+      servers:
+        Object.entries(SERVERS)
+          .map(([code, name]) => ({
+            code,
+            name
+          })),
 
-      total: filtered.length,
+      total:
+        filtered.length,
 
-      events: filtered,
+      events:
+        filtered,
 
       updated_at:
         new Date().toISOString()
-    };
-
-    // Không có dữ liệu
-    if (
-      filtered.length === 0
-    ) {
-      response.message =
-        server
-          ? `Không có event có thông tin server ${server} từ nguồn dữ liệu hiện tại.`
-          : "Nguồn dữ liệu hiện tại không trả về event.";
-    }
-
-    return sendJSON(
-      res,
-      200,
-      response
-    );
+    });
 
   } catch (error) {
     console.error(
-      "FFVN.TGM EVENTS ERROR:",
+      "FFVN.TGM API ERROR:",
       error
     );
 
     if (
       error.code ===
-      "MISSING_API_KEY"
+      "NO_NENCER_KEY"
     ) {
-      return sendJSON(res, 500, {
+      return json(res, 500, {
         success: false,
-        error: "MISSING_NENCER_API_KEY",
+        error:
+          "NENCER_API_KEY_MISSING",
         message:
-          "Chưa cấu hình NENCER_API_KEY trên Vercel."
+          "Chưa thêm NENCER_API_KEY vào Vercel Environment Variables."
       });
     }
 
     if (
       error.code ===
-      "INVALID_NENCER_API_KEY"
+      "INVALID_NENCER_KEY"
     ) {
-      return sendJSON(res, 502, {
+      return json(res, 502, {
         success: false,
         error:
           "INVALID_NENCER_API_KEY",
         message:
-          "Nencer API Key không hợp lệ hoặc không được cấp quyền truy cập endpoint events."
+          "NENCER_API_KEY không hợp lệ hoặc không có quyền truy cập API Events."
       });
     }
 
     if (
       error.code ===
-      "UPSTREAM_INVALID_JSON"
+      "INVALID_UPSTREAM_JSON"
     ) {
-      return sendJSON(res, 502, {
+      return json(res, 502, {
         success: false,
         error:
-          "UPSTREAM_INVALID_JSON",
+          "INVALID_UPSTREAM_JSON",
         message:
-          "Nguồn Nencer không trả về JSON hợp lệ."
+          "Nencer không trả về dữ liệu JSON hợp lệ."
       });
     }
 
@@ -632,20 +604,22 @@ module.exports = async function handler(
       error.name ===
       "AbortError"
     ) {
-      return sendJSON(res, 504, {
+      return json(res, 504, {
         success: false,
-        error: "UPSTREAM_TIMEOUT",
+        error:
+          "NENCER_TIMEOUT",
         message:
           "Nencer phản hồi quá thời gian chờ."
       });
     }
 
-    return sendJSON(res, 502, {
+    return json(res, 502, {
       success: false,
-      error: "UPSTREAM_ERROR",
+      error:
+        "EVENT_SOURCE_ERROR",
       message:
         error.message ||
-        "Không thể lấy dữ liệu event từ Nencer."
+        "Không thể lấy dữ liệu Event Free Fire."
     });
   }
 };
